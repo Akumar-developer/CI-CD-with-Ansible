@@ -1,0 +1,62 @@
+---
+- name: Configure AWS EC2 and deploy DevOps Demo App
+  hosts: app_servers
+  become: true
+  gather_facts: true
+
+  vars:
+    app_name: devops-demo
+    app_port: 3000
+    docker_image: "YOUR_DOCKERHUB_USERNAME/devops-demo-app:1.0"
+
+  tasks:
+
+    - name: Update apt package cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Install required packages
+      ansible.builtin.apt:
+        name:
+          - docker.io
+          - python3
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Ensure Docker service is running and enabled
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Pull application Docker image
+      community.docker.docker_image:
+        name: "{{ docker_image }}"
+        source: pull
+
+    - name: Run application container
+      community.docker.docker_container:
+        name: "{{ app_name }}"
+        image: "{{ docker_image }}"
+        state: started
+        restart_policy: unless-stopped
+        published_ports:
+          - "{{ app_port }}:3000"
+        env:
+          NODE_ENV: production
+
+    - name: Wait for application health endpoint
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ app_port }}/health"
+        method: GET
+        status_code: 200
+      register: health_check
+      retries: 10
+      delay: 3
+      until: health_check.status == 200
+
+    - name: Display deployment result
+      ansible.builtin.debug:
+        msg: "Deployment successful. Application health check passed."
